@@ -1,7 +1,8 @@
+cabal-version:  >=1.10
 name:           time
-version:        1.10
+version:        1.11.1.2
 stability:      stable
-license:        BSD3
+license:        BSD2
 license-file:   LICENSE
 author:         Ashley Yakeley
 maintainer:     <ashley@semantic.org>
@@ -11,8 +12,10 @@ synopsis:       A time library
 description:    Time, clocks and calendars
 category:       Time
 build-type:     Configure
-cabal-version:  >=1.10
-tested-with:    GHC == 8.0.2, GHC == 8.2.2, GHC == 8.4.4, GHC == 8.6.5
+tested-with:
+    GHC == 8.8.4,
+    GHC == 8.10.2,
+    GHC == 9.0
 x-follows-version-policy:
 
 extra-source-files:
@@ -41,11 +44,12 @@ library
         Rank2Types
         DeriveDataTypeable
         StandaloneDeriving
-        CPP
+        PatternSynonyms
+        ViewPatterns
     ghc-options: -Wall -fwarn-tabs
     c-sources: lib/cbits/HsTime.c
     build-depends:
-        base >= 4.9 && < 5,
+        base >= 4.13 && < 5,
         deepseq >= 1.1,
         bytestring >= 0.9,
         binary >= 0.4.1,
@@ -59,6 +63,8 @@ library
         Data.Time.Calendar.WeekDate,
         Data.Time.Calendar.Julian,
         Data.Time.Calendar.Easter,
+        Data.Time.Calendar.Month,
+        Data.Time.Calendar.Quarter,
         Data.Time.Clock,
         Data.Time.Clock.System,
         Data.Time.Clock.POSIX,
@@ -79,7 +85,8 @@ library
         exposed-modules:
             Data.Time.TZDatabase.Unix
     other-modules:
-        Data.Format
+        Data.Format,
+        Data.Time.Calendar.Types,
         Data.Time.Calendar.Private,
         Data.Time.Calendar.Days,
         Data.Time.Calendar.Gregorian,
@@ -98,7 +105,7 @@ library
         Data.Time.Clock.Internal.UTCDiff,
         Data.Time.LocalTime.Internal.TimeZone,
         Data.Time.LocalTime.Internal.TimeOfDay,
-        Data.Time.LocalTime.Internal.CalendarDiffTime
+        Data.Time.LocalTime.Internal.CalendarDiffTime,
         Data.Time.LocalTime.Internal.LocalTime,
         Data.Time.LocalTime.Internal.ZonedTime,
         Data.Time.Format.Parse,
@@ -112,6 +119,9 @@ library
         install-includes:
             HsTime.h
     else
+        -- # requires cabal 3, see #145, #146
+        --autogen-includes:
+        --    HsTimeConfig.h
         install-includes:
             HsTime.h
             HsTimeConfig.h
@@ -158,7 +168,6 @@ test-suite test-main
     default-language: Haskell2010
     default-extensions:
         Rank2Types
-        CPP
         DeriveDataTypeable
         StandaloneDeriving
         ExistentialQuantification
@@ -178,10 +187,12 @@ test-suite test-main
         tasty-quickcheck
     main-is: Main.hs
     other-modules:
+        Test.Types
         Test.TestUtil
         Test.Arbitrary
         Test.Calendar.AddDays
         Test.Calendar.AddDaysRef
+        Test.Calendar.CalendarProps
         Test.Calendar.Calendars
         Test.Calendar.CalendarsRef
         Test.Calendar.ClipDates
@@ -200,6 +211,7 @@ test-suite test-main
         Test.Clock.Resolution
         Test.Clock.TAI
         Test.Clock.LeapSeconds
+        Test.Format.Compile
         Test.Format.Format
         Test.Format.ParseTime
         Test.Format.ISO8601
@@ -216,7 +228,6 @@ test-suite test-unix
     default-language: Haskell2010
     default-extensions:
         Rank2Types
-        CPP
         DeriveDataTypeable
         StandaloneDeriving
         ExistentialQuantification
@@ -238,11 +249,21 @@ test-suite test-unix
         tasty-hunit,
         tasty-golden,
         tasty-quickcheck
-    if !os(windows)
-        build-depends: unix
     main-is: Main.hs
     other-modules:
         Test.TestUtil
         Test.Format.Format
         Test.LocalTime.TimeZone
         Test.LocalTime.TZ
+
+benchmark time-bench
+    type: exitcode-stdio-1.0
+    hs-source-dirs: benchmark
+    default-language: Haskell2010
+    ghc-options: -Wall -fwarn-tabs
+    build-depends:
+        base,
+        deepseq,
+        time,
+        criterion
+    main-is: Main.hs

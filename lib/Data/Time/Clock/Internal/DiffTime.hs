@@ -1,5 +1,4 @@
 {-# LANGUAGE Trustworthy #-}
-{-# OPTIONS -fno-warn-unused-imports #-}
 
 module Data.Time.Clock.Internal.DiffTime
     (
@@ -13,22 +12,22 @@ module Data.Time.Clock.Internal.DiffTime
 import Control.DeepSeq
 import Data.Data
 import Data.Fixed
-import Data.Ratio ((%))
-import Data.Typeable
+import Text.ParserCombinators.ReadP
+import Text.ParserCombinators.ReadPrec
+import GHC.Read
 
 -- | This is a length of time, as measured by a clock.
--- Conversion functions will treat it as seconds.
--- It has a precision of 10^-12 s.
+-- Conversion functions such as 'fromInteger' and 'realToFrac' will treat it as seconds.
+-- For example, @(0.010 :: DiffTime)@ corresponds to 10 milliseconds.
+--
+-- It has a precision of one picosecond (= 10^-12 s). Enumeration functions will treat it as picoseconds.
 newtype DiffTime =
     MkDiffTime Pico
     deriving (Eq, Ord, Data, Typeable)
 
--- necessary because H98 doesn't have "cunning newtype" derivation
-instance NFData DiffTime -- FIXME: Data.Fixed had no NFData instances yet at time of writing
-                                                                                             where
-    rnf dt = seq dt ()
+instance NFData DiffTime where
+    rnf (MkDiffTime t) = rnf t
 
--- necessary because H98 doesn't have "cunning newtype" derivation
 instance Enum DiffTime where
     succ (MkDiffTime a) = MkDiffTime (succ a)
     pred (MkDiffTime a) = MkDiffTime (pred a)
@@ -42,7 +41,12 @@ instance Enum DiffTime where
 instance Show DiffTime where
     show (MkDiffTime t) = (showFixed True t) ++ "s"
 
--- necessary because H98 doesn't have "cunning newtype" derivation
+instance Read DiffTime where
+    readPrec = do
+        t <- readPrec
+        _ <- lift $ char 's'
+        return $ MkDiffTime t
+
 instance Num DiffTime where
     (MkDiffTime a) + (MkDiffTime b) = MkDiffTime (a + b)
     (MkDiffTime a) - (MkDiffTime b) = MkDiffTime (a - b)
@@ -52,17 +56,14 @@ instance Num DiffTime where
     signum (MkDiffTime a) = MkDiffTime (signum a)
     fromInteger i = MkDiffTime (fromInteger i)
 
--- necessary because H98 doesn't have "cunning newtype" derivation
 instance Real DiffTime where
     toRational (MkDiffTime a) = toRational a
 
--- necessary because H98 doesn't have "cunning newtype" derivation
 instance Fractional DiffTime where
     (MkDiffTime a) / (MkDiffTime b) = MkDiffTime (a / b)
     recip (MkDiffTime a) = MkDiffTime (recip a)
     fromRational r = MkDiffTime (fromRational r)
 
--- necessary because H98 doesn't have "cunning newtype" derivation
 instance RealFrac DiffTime where
     properFraction (MkDiffTime a) = let
         (b', a') = properFraction a

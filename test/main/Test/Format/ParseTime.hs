@@ -7,9 +7,13 @@ module Test.Format.ParseTime
 
 import Control.Monad
 import Data.Char
+import Data.Maybe
+import Data.Proxy
 import Data.Time
 import Data.Time.Calendar.OrdinalDate
 import Data.Time.Calendar.WeekDate
+import Data.Time.Calendar.Month
+import Data.Time.Calendar.Quarter
 import Test.Arbitrary ()
 import Test.QuickCheck.Property
 import Test.Tasty
@@ -17,6 +21,88 @@ import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck hiding (reason)
 import Test.TestUtil
 import Text.Read
+
+format :: FormatTime t => String -> t -> String
+format f t = formatTime defaultTimeLocale f t
+
+parse :: ParseTime t => Bool -> String -> String -> Maybe t
+parse sp f t = parseTimeM sp defaultTimeLocale f t
+
+data FormatOnly
+
+data ParseAndFormat
+
+data FormatCode pf t = MkFormatCode
+    { fcModifier :: String
+    , fcWidth :: Maybe Int
+    , fcAlt :: Bool
+    , fcSpecifier :: Char
+    }
+
+instance Show (FormatCode pf t) where
+    show (MkFormatCode m w a s) = let
+        ms = m
+        ws = fromMaybe "" $ fmap show w
+        as =
+            if a
+                then "E"
+                else ""
+        ss = [s]
+        in '%' : (ms <> ws <> as <> ss)
+
+formatCode :: FormatTime t => FormatCode pf t -> t -> String
+formatCode fc = format $ show fc
+
+parseCode :: ParseTime t => FormatCode ParseAndFormat t -> String -> Maybe t
+parseCode fc = parse False $ show fc
+
+class HasFormatCodes t where
+    allFormatCodes :: Proxy t -> [(Bool, Char)]
+    incompleteS :: Maybe t
+    incompleteS = Nothing
+
+minCodeWidth :: Char -> Int
+minCodeWidth _ = 0
+
+fcShrink :: FormatCode pf t -> [FormatCode pf t]
+fcShrink fc = let
+    fc1 =
+        case fcWidth fc of
+            Nothing -> []
+            Just w
+                | w > (minCodeWidth $ fcSpecifier fc) -> [fc {fcWidth = Nothing}, fc {fcWidth = Just $ w - 1}]
+            Just _ -> [fc {fcWidth = Nothing}]
+    fc2 =
+        case fcAlt fc of
+            False -> []
+            True -> [fc {fcAlt = False}]
+    fc3 =
+        case fcModifier fc of
+            "" -> []
+            _ -> [fc {fcModifier = ""}]
+    in fc1 ++ fc2 ++ fc3
+
+instance HasFormatCodes t => Arbitrary (FormatCode FormatOnly t) where
+    arbitrary = do
+        m <- oneof [return "", oneof $ fmap return ["", "-", "_", "0", "^", "#"]]
+        (a, s) <- oneof $ fmap return $ allFormatCodes (Proxy :: Proxy t)
+        w <-
+            case minCodeWidth s of
+                0 -> return Nothing
+                mw -> oneof [return Nothing, fmap Just $ choose (mw, 15)]
+        return $ MkFormatCode m w a s
+    shrink = fcShrink
+
+instance HasFormatCodes t => Arbitrary (FormatCode ParseAndFormat t) where
+    arbitrary = do
+        (a, s) <- oneof $ fmap return $ allFormatCodes (Proxy :: Proxy t)
+        m <-
+            case s of
+                'Z' -> return ""
+                'z' -> return ""
+                _ -> oneof [return "", oneof $ fmap return ["", "-", "_", "0"]]
+        return $ MkFormatCode m Nothing a s
+    shrink = fcShrink
 
 testParseTime :: TestTree
 testParseTime =
@@ -49,6 +135,8 @@ extests =
          , makeExhaustiveTest "parse %-C %y 1400s" [0, 1, 50, 99] (parseCYY 14)
          , makeExhaustiveTest "parse %C %y 0700s" [0, 1, 50, 99] (parseCYY2 7)
          , makeExhaustiveTest "parse %-C %y 700s" [0, 1, 50, 99] (parseCYY 7)
+         , makeExhaustiveTest "parse %-C %y -700s" [0, 1, 50, 99] (parseCYY (-7))
+         , makeExhaustiveTest "parse %-C %y -70000s" [0, 1, 50, 99] (parseCYY (-70000))
          , makeExhaustiveTest "parse %-C %y 10000s" [0, 1, 50, 99] (parseCYY 100)
          , makeExhaustiveTest "parse %-C centuries" [20 .. 100] (parseCentury " ")
          , makeExhaustiveTest "parse %-C century X" [1, 10, 20, 100] (parseCentury "X")
@@ -62,7 +150,7 @@ extests =
                    , (makeExhaustiveTest "parse %Y %m %d" (yearDays y) parseYearDayD)
                    , (makeExhaustiveTest "parse %Y %-m %e" (yearDays y) parseYearDayE)
                    ])
-              [1, 4, 20, 753, 2000, 2011, 10001]))
+              [1, 4, 20, 753, 2000, 2011, 10001, (-1166)]))
 
 readTest :: (Eq a, Show a, Read a) => [(a, String)] -> String -> TestTree
 readTest expected target = let
@@ -254,12 +342,6 @@ defaultTimeZoneTests = testGroup "default time zones" (fmap testParseTimeZone (k
 militaryTimeZoneTests :: TestTree
 militaryTimeZoneTests = testGroup "military time zones" (fmap (testParseTimeZone . getMilZone) [-12 .. 12])
 
-parse :: ParseTime t => Bool -> String -> String -> Maybe t
-parse sp f t = parseTimeM sp defaultTimeLocale f t
-
-format :: (FormatTime t) => String -> t -> String
-format f t = formatTime defaultTimeLocale f t
-
 -- missing from the time package
 instance Eq ZonedTime where
     ZonedTime t1 tz1 == ZonedTime t2 tz2 = t1 == t2 && tz1 == tz2
@@ -294,6 +376,12 @@ test_parse_format f t = let
 prop_read_show :: (Read a, Show a, Eq a) => a -> Result
 prop_read_show t = compareResult (Just t) (readMaybe (show t))
 
+prop_read_show_ZonedUTC :: ZonedTime -> Result
+prop_read_show_ZonedUTC t = compareResult (Just $ zonedTimeToUTC t) (readMaybe (show t))
+
+prop_read_show_LocalUTC :: LocalTime -> Result
+prop_read_show_LocalUTC t = compareResult (Just $ localTimeToUTC utc t) (readMaybe (show t))
+
 --
 -- * special show functions
 --
@@ -321,23 +409,64 @@ prop_fromSundayStartWeek d = let
     (y, _, _) = toGregorian d
     in compareResult d (fromSundayStartWeek y w wd)
 
---
--- * format and parse
---
+-- t == parse (format t)
 prop_parse_format :: (Eq t, FormatTime t, ParseTime t, Show t) => FormatString t -> t -> Result
 prop_parse_format (FormatString f) t = compareParse t f (format f t)
 
--- Verify case-insensitivity with upper case.
+-- t == parse (upper (format t))
 prop_parse_format_upper :: (Eq t, FormatTime t, ParseTime t, Show t) => FormatString t -> t -> Result
 prop_parse_format_upper (FormatString f) t = compareParse t f (map toUpper $ format f t)
 
--- Verify case-insensitivity with lower case.
+-- t == parse (lower (format t))
 prop_parse_format_lower :: (Eq t, FormatTime t, ParseTime t, Show t) => FormatString t -> t -> Result
 prop_parse_format_lower (FormatString f) t = compareParse t f (map toLower $ format f t)
 
-prop_format_parse_format :: (FormatTime t, ParseTime t) => FormatString t -> t -> Result
-prop_format_parse_format (FormatString f) t =
-    compareResult (Just (format f t)) (fmap (format f) (parse False f (format f t) `asTypeOf` Just t))
+-- Default time is 1970-01-01 00:00:00 +0000 (which was a Thursday)
+in1970 :: Maybe String -> Char -> String -> Maybe String
+in1970 _ 'j' "366" = Nothing -- 1970 was not a leap year
+in1970 _ 'U' "53" = Nothing -- last day of 1970 was Sunday-start-week 52
+in1970 _ 'W' "53" = Nothing -- last day of 1970 was Monday-start-week 52
+in1970 (Just s) 'S' "60" = Just s -- no leap second without other data
+in1970 _ _ s = Just s
+
+-- format t == format (parse (format t))
+prop_format_parse_format ::
+       forall t. (HasFormatCodes t, FormatTime t, ParseTime t)
+    => Proxy t
+    -> FormatCode ParseAndFormat t
+    -> t
+    -> Result
+prop_format_parse_format _ fc v = let
+    s1 = formatCode fc v
+    ms1 = in1970 (fmap (formatCode fc) (incompleteS :: Maybe t)) (fcSpecifier fc) s1
+    mv2 :: Maybe t
+    mv2 = parseCode fc s1
+    ms2 = fmap (formatCode fc) mv2
+    in compareResult ms1 ms2
+
+instance HasFormatCodes Day where
+    allFormatCodes _ = [(False, s) | s <- "DFxYyCBbhmdejfVUW"]
+
+instance HasFormatCodes TimeOfDay where
+    allFormatCodes _ = [(False, s) | s <- "RTXrPpHkIlMSqQ"]
+
+instance HasFormatCodes LocalTime where
+    allFormatCodes _ = allFormatCodes (Proxy :: Proxy Day) ++ allFormatCodes (Proxy :: Proxy TimeOfDay)
+
+instance HasFormatCodes TimeZone where
+    allFormatCodes _ = [(a, s) | a <- [False, True], s <- "zZ"]
+
+instance HasFormatCodes ZonedTime where
+    allFormatCodes _ =
+        [(False, s) | s <- "cs"] ++
+        allFormatCodes (Proxy :: Proxy LocalTime) ++ allFormatCodes (Proxy :: Proxy TimeZone)
+
+instance HasFormatCodes UTCTime where
+    allFormatCodes _ = [(False, s) | s <- "cs"] ++ allFormatCodes (Proxy :: Proxy LocalTime)
+    incompleteS = Just $ UTCTime (fromGregorian 2000 1 1) 0
+
+instance HasFormatCodes UniversalTime where
+    allFormatCodes _ = allFormatCodes (Proxy :: Proxy LocalTime)
 
 --
 -- * crashes in parse
@@ -379,6 +508,7 @@ instance Show (FormatString a) where
 typedTests :: (forall t. (Eq t, FormatTime t, ParseTime t, Show t) => FormatString t -> t -> Result) -> [TestTree]
 typedTests prop =
     [ nameTest "Day" $ tgroup dayFormats prop
+    , nameTest "Month" $ tgroup monthFormats prop
     , nameTest "TimeOfDay" $ tgroup timeOfDayFormats prop
     , nameTest "LocalTime" $ tgroup localTimeFormats prop
     , nameTest "TimeZone" $ tgroup timeZoneFormats prop
@@ -393,17 +523,59 @@ typedTests prop =
     , nameTest "NominalDiffTime" $ tgroup nominalDiffTimeFormats prop
     ]
 
+allTypes ::
+       (forall t. (Eq t, Show t, Arbitrary t, FormatTime t, ParseTime t, HasFormatCodes t) => String -> Proxy t -> r)
+    -> [r]
+allTypes f =
+    [ f "Day" (Proxy :: Proxy Day)
+    , f "TimeOfDay" (Proxy :: Proxy TimeOfDay)
+    , f "LocalTime" (Proxy :: Proxy LocalTime)
+    , f "TimeZone" (Proxy :: Proxy TimeZone)
+    , f "ZonedTime" (Proxy :: Proxy ZonedTime)
+    , f "UTCTime" (Proxy :: Proxy UTCTime)
+    , f "UniversalTime" (Proxy :: Proxy UniversalTime)
+    ]
+
+allLeapSecondTypes ::
+       (forall t. (Eq t, Show t, Arbitrary t, FormatTime t, ParseTime t, HasFormatCodes t) => String -> t -> r)
+    -> [r]
+allLeapSecondTypes f = let
+    day :: Day
+    day = fromGregorian 2000 01 01
+    lsTimeOfDay :: TimeOfDay
+    lsTimeOfDay = TimeOfDay 23 59 60.5
+    lsLocalTime :: LocalTime
+    lsLocalTime = LocalTime day lsTimeOfDay
+    lsZonedTime :: ZonedTime
+    lsZonedTime = ZonedTime lsLocalTime utc
+    lsUTCTime :: UTCTime
+    lsUTCTime = UTCTime day 86400.5
+    in
+    [ f "TimeOfDay" lsTimeOfDay
+    , f "LocalTime" lsLocalTime
+    , f "ZonedTime" lsZonedTime
+    , f "UTCTime" lsUTCTime
+    ]
+
+parseEmptyTest ::
+       forall t. ParseTime t
+    => Proxy t
+    -> Assertion
+parseEmptyTest _ =
+    case parse False "" "" :: Maybe t of
+        Just _ -> return ()
+        Nothing -> assertFailure "failed"
+
+parseEmptyTests :: TestTree
+parseEmptyTests = nameTest "parse empty" $ allTypes $ \name p -> nameTest name $ parseEmptyTest p
+
 formatParseFormatTests :: TestTree
-formatParseFormatTests =
-    nameTest
-        "format_parse_format"
-        [ nameTest "Day" $ tgroup partialDayFormats prop_format_parse_format
-        , nameTest "TimeOfDay" $ tgroup partialTimeOfDayFormats prop_format_parse_format
-        , nameTest "LocalTime" $ tgroup partialLocalTimeFormats prop_format_parse_format
-        , nameTest "ZonedTime" $ tgroup partialZonedTimeFormats prop_format_parse_format
-        , nameTest "UTCTime" $ tgroup partialUTCTimeFormats prop_format_parse_format
-        , nameTest "UniversalTime" $ tgroup partialUniversalTimeFormats prop_format_parse_format
-        ]
+formatParseFormatTests = nameTest "format_parse_format"
+    [
+        localOption (QuickCheckTests 50000) $
+        nameTest "general" $ allTypes $ \name p -> nameTest name $ prop_format_parse_format p,
+        nameTest "leapsecond" $ allLeapSecondTypes $ \name t -> nameTest name $ \fc -> prop_format_parse_format Proxy fc t
+    ]
 
 badInputTests :: TestTree
 badInputTests =
@@ -425,12 +597,19 @@ readShowTests =
     nameTest
         "read_show"
         [ nameTest "Day" (prop_read_show :: Day -> Result)
+        , nameTest "Month" (prop_read_show :: Month -> Result)
+        , nameTest "QuarterOfYear" (prop_read_show :: QuarterOfYear -> Result)
+        , nameTest "Quarter" (prop_read_show :: Quarter -> Result)
         , nameTest "TimeOfDay" (prop_read_show :: TimeOfDay -> Result)
         , nameTest "LocalTime" (prop_read_show :: LocalTime -> Result)
         , nameTest "TimeZone" (prop_read_show :: TimeZone -> Result)
         , nameTest "ZonedTime" (prop_read_show :: ZonedTime -> Result)
         , nameTest "UTCTime" (prop_read_show :: UTCTime -> Result)
+        , nameTest "UTCTime (zoned)" prop_read_show_ZonedUTC
+        , nameTest "UTCTime (local)" prop_read_show_LocalUTC
         , nameTest "UniversalTime" (prop_read_show :: UniversalTime -> Result)
+        , nameTest "NominalDiffTime" (prop_read_show :: NominalDiffTime -> Result)
+        , nameTest "DiffTime" (prop_read_show :: DiffTime -> Result)
     --nameTest "CalendarDiffDays" (prop_read_show :: CalendarDiffDays -> Result),
     --nameTest "CalendarDiffTime" (prop_read_show :: CalendarDiffTime -> Result)
         ]
@@ -446,6 +625,7 @@ parseShowTests =
 
 propertyTests :: TestTree
 propertyTests =
+    localOption (QuickCheckTests 2000) $
     nameTest
         "properties"
         [ readShowTests
@@ -455,6 +635,7 @@ propertyTests =
         , nameTest "parse_format" $ typedTests prop_parse_format
         , nameTest "parse_format_lower" $ typedTests prop_parse_format_lower
         , nameTest "parse_format_upper" $ typedTests prop_parse_format_upper
+        , parseEmptyTests
         , formatParseFormatTests
         , badInputTests
         ]
@@ -476,8 +657,12 @@ dayFormats =
         , "%Y-%B-%d"
         , "%Y-%b-%d"
         , "%Y-%h-%d"
+        , "%C-%y-%B-%d"
+        , "%C-%y-%b-%d"
+        , "%C-%y-%h-%d"
      -- ordinal dates
         , "%Y-%j"
+        , "%C-%y-%j"
      -- ISO week dates
         , "%G-%V-%u"
         , "%G-%V-%a"
@@ -500,6 +685,27 @@ dayFormats =
         , "%Y-%A-w%W"
         , "%A week %U, %Y"
         , "%A week %W, %Y"
+        ]
+
+monthFormats :: [FormatString Month]
+monthFormats =
+    map FormatString
+     -- numeric year, month
+        [ "%Y-%m"
+        , "%Y%m"
+        , "%C%y%m"
+        , "%Y %m"
+        , "%m/%Y"
+        , "%m/%Y"
+        , "%Y/%m"
+        , "%C %y %m"
+     -- month names
+        , "%Y-%B"
+        , "%Y-%b"
+        , "%Y-%h"
+        , "%C-%y-%B"
+        , "%C-%y-%b"
+        , "%C-%y-%h"
         ]
 
 timeOfDayFormats :: [FormatString TimeOfDay]
@@ -533,7 +739,7 @@ localTimeFormats :: [FormatString LocalTime]
 localTimeFormats = map FormatString [] {-"%Q","%Q ","%QX"-}
 
 timeZoneFormats :: [FormatString TimeZone]
-timeZoneFormats = map FormatString ["%z", "%z%Z", "%Z%z", "%Z"]
+timeZoneFormats = map FormatString ["%z", "%z%Z", "%Z%z", "%Z", "%Ez", "%EZ"]
 
 zonedTimeFormats :: [FormatString ZonedTime]
 zonedTimeFormats =
@@ -584,7 +790,7 @@ partialDayFormats :: [FormatString Day]
 partialDayFormats = map FormatString []
 
 partialTimeOfDayFormats :: [FormatString TimeOfDay]
-partialTimeOfDayFormats = map FormatString []
+partialTimeOfDayFormats = map FormatString ["%H", "%M", "%S", "%H:%M"]
 
 partialLocalTimeFormats :: [FormatString LocalTime]
 partialLocalTimeFormats = map FormatString []

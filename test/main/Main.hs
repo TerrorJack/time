@@ -1,6 +1,8 @@
 module Main where
 
+import Test.Types()
 import Test.Calendar.AddDays
+import Test.Calendar.CalendarProps
 import Test.Calendar.Calendars
 import Test.Calendar.ClipDates
 import Test.Calendar.ConvertBack
@@ -14,6 +16,7 @@ import Test.Clock.Conversion
 import Test.Clock.LeapSeconds
 import Test.Clock.Resolution
 import Test.Clock.TAI
+import Test.Format.Compile ()
 import Test.Format.Format
 import Test.Format.ISO8601
 import Test.Format.ParseTime
@@ -29,6 +32,7 @@ tests =
         [ testGroup
               "Calendar"
               [ addDaysTest
+              , testCalendarProps
               , testCalendars
               , clipDates
               , convertBack

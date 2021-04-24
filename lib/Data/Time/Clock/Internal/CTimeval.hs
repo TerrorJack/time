@@ -1,3 +1,6 @@
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE Safe #-}
+
 module Data.Time.Clock.Internal.CTimeval where
 #ifndef mingw32_HOST_OS
 -- All Unix-specific, this

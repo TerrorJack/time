@@ -1,4 +1,4 @@
-{-# OPTIONS -fno-warn-unused-imports #-}
+{-# LANGUAGE Safe #-}
 
 module Data.Time.LocalTime.Internal.TimeOfDay
     (
@@ -12,7 +12,9 @@ module Data.Time.LocalTime.Internal.TimeOfDay
     , utcToLocalTimeOfDay
     , localToUTCTimeOfDay
     , timeToTimeOfDay
+    , pastMidnight
     , timeOfDayToTime
+    , sinceMidnight
     , dayFractionToTimeOfDay
     , timeOfDayToDayFraction
     ) where
@@ -24,7 +26,6 @@ import Data.Time.Calendar.Private
 import Data.Time.Clock.Internal.DiffTime
 import Data.Time.Clock.Internal.NominalDiffTime
 import Data.Time.LocalTime.Internal.TimeZone
-import Data.Typeable
 
 -- | Time of day as represented in hour, minute and second (with picoseconds), typically used to express local time of day.
 data TimeOfDay = TimeOfDay
@@ -38,7 +39,7 @@ data TimeOfDay = TimeOfDay
     } deriving (Eq, Ord, Data, Typeable)
 
 instance NFData TimeOfDay where
-    rnf (TimeOfDay h m s) = rnf h `seq` rnf m `seq` s `seq` () -- FIXME: Data.Fixed had no NFData instances yet at time of writing
+    rnf (TimeOfDay h m s) = rnf h `seq` rnf m `seq` rnf s `seq` ()
 
 -- | Hour zero
 midnight :: TimeOfDay
@@ -100,9 +101,17 @@ timeToTimeOfDay dt = TimeOfDay (fromInteger h) (fromInteger m) s
     m = mod' m' 60
     h = div' m' 60
 
+-- | Same as 'timeToTimeOfDay'.
+pastMidnight :: DiffTime -> TimeOfDay
+pastMidnight = timeToTimeOfDay
+
 -- | Get the time since midnight for a given time of day.
 timeOfDayToTime :: TimeOfDay -> DiffTime
 timeOfDayToTime (TimeOfDay h m s) = ((fromIntegral h) * 60 + (fromIntegral m)) * 60 + (realToFrac s)
+
+-- | Same as 'timeOfDayToTime'.
+sinceMidnight :: TimeOfDay -> DiffTime
+sinceMidnight = timeOfDayToTime
 
 -- | Get the time of day given the fraction of a day since midnight.
 dayFractionToTimeOfDay :: Rational -> TimeOfDay

@@ -1,10 +1,18 @@
+{-# LANGUAGE Safe #-}
+
 module Data.Time.Calendar.Week
     (
       -- * Week
       DayOfWeek(..)
     , dayOfWeek
+    , dayOfWeekDiff
+    , firstDayOfWeekOnAfter
     ) where
 
+import Data.Fixed
+import Data.Ix
+import Data.Data
+import Control.DeepSeq
 import Data.Time.Calendar.Days
 
 data DayOfWeek
@@ -15,7 +23,16 @@ data DayOfWeek
     | Friday
     | Saturday
     | Sunday
-    deriving (Eq, Show, Read)
+    deriving (Eq, Show, Read, Data, Typeable, Ord, Ix)
+
+instance NFData DayOfWeek where
+    rnf Monday = ()
+    rnf Tuesday = ()
+    rnf Wednesday = ()
+    rnf Thursday = ()
+    rnf Friday = ()
+    rnf Saturday = ()
+    rnf Sunday = ()
 
 -- | \"Circular\", so for example @[Tuesday ..]@ gives an endless sequence.
 -- Also: 'fromEnum' gives [1 .. 7] for [Monday .. Sunday], and 'toEnum' performs mod 7 to give a cycle of days.
@@ -45,3 +62,13 @@ instance Enum DayOfWeek where
 
 dayOfWeek :: Day -> DayOfWeek
 dayOfWeek (ModifiedJulianDay d) = toEnum $ fromInteger $ d + 3
+
+
+-- | @dayOfWeekDiff a b = a - b@ in range 0 to 6.
+-- The number of days from b to the next a.
+dayOfWeekDiff :: DayOfWeek -> DayOfWeek -> Int
+dayOfWeekDiff a b = mod' (fromEnum a - fromEnum b) 7
+
+-- | The first day-of-week on or after some day
+firstDayOfWeekOnAfter :: DayOfWeek -> Day -> Day
+firstDayOfWeekOnAfter dw d = addDays (toInteger $ dayOfWeekDiff dw $ dayOfWeek d) d

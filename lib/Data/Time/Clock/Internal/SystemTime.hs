@@ -1,5 +1,11 @@
-{-# OPTIONS -fno-warn-trustworthy-safe #-}
+{-# LANGUAGE CPP #-}
+#include "HsTimeConfig.h"
+
+#if defined(mingw32_HOST_OS) || !defined(HAVE_CLOCK_GETTIME)
+{-# LANGUAGE Safe #-}
+#else
 {-# LANGUAGE Trustworthy #-}
+#endif
 
 module Data.Time.Clock.Internal.SystemTime
     ( SystemTime(..)
@@ -8,11 +14,11 @@ module Data.Time.Clock.Internal.SystemTime
     , getTAISystemTime
     ) where
 
+import Data.Data
 import Control.DeepSeq
 import Data.Int (Int64)
 import Data.Time.Clock.Internal.DiffTime
 import Data.Word
-#include "HsTimeConfig.h"
 
 #ifdef mingw32_HOST_OS
 import qualified System.Win32.Time as Win32
@@ -31,7 +37,7 @@ import Foreign.C.Types (CLong(..))
 data SystemTime = MkSystemTime
     { systemSeconds :: {-# UNPACK #-}!Int64
     , systemNanoseconds :: {-# UNPACK #-}!Word32
-    } deriving (Eq, Ord, Show)
+    } deriving (Eq, Ord, Show, Data, Typeable)
 
 instance NFData SystemTime where
     rnf a = a `seq` ()
@@ -39,7 +45,8 @@ instance NFData SystemTime where
 -- | Get the system time, epoch start of 1970 UTC, leap-seconds ignored.
 -- 'getSystemTime' is typically much faster than 'getCurrentTime'.
 getSystemTime :: IO SystemTime
--- | The resolution of 'getSystemTime', 'getCurrentTime', 'getPOSIXTime'
+-- | The resolution of 'getSystemTime', 'getCurrentTime', 'getPOSIXTime'.
+-- On UNIX systems this uses @clock_getres@, which may be <https://github.com/microsoft/WSL/issues/6029 wrong on WSL2>.
 getTime_resolution :: DiffTime
 -- | If supported, get TAI time, epoch start of 1970 TAI, with resolution.
 -- This is supported only on UNIX systems, and only those with CLOCK_TAI available at run-time.

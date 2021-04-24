@@ -1,29 +1,27 @@
+{-# LANGUAGE Safe #-}
+
 module Data.Time.Calendar.CalendarDiffDays
     (
         -- * Calendar Duration
         module Data.Time.Calendar.CalendarDiffDays
     ) where
 
-#if MIN_VERSION_base(4,11,0)
-#else
-import Data.Semigroup hiding (option)
-#endif
 import Data.Typeable
 import Data.Data
+import Control.DeepSeq
 
 data CalendarDiffDays = CalendarDiffDays
     { cdMonths :: Integer
     , cdDays :: Integer
     } deriving (Eq,
     Data
-#if __GLASGOW_HASKELL__ >= 802
     -- ^ @since 1.9.2
-#endif
     ,Typeable
-#if __GLASGOW_HASKELL__ >= 802
     -- ^ @since 1.9.2
-#endif
     )
+
+instance NFData CalendarDiffDays where
+    rnf (CalendarDiffDays m d) = rnf m `seq` rnf d `seq` ()
 
 -- | Additive
 instance Semigroup CalendarDiffDays where
